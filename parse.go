@@ -18,7 +18,7 @@ func parseHeader(data []byte) Header {
 
 	byteFour := data[3] // RA, Z, RCODE
 	header.RA = (byteFour & 0b1000_0000) != 0
-	header.Z = (byteFour & 0b0111_1000) >> 4
+	header.Z = (byteFour & 0b0111_0000) >> 4
 	header.RCODE = (byteFour & 0b0000_1111)
 
 	header.QDCOUNT = binary.BigEndian.Uint16(data[4:6])
@@ -31,13 +31,9 @@ func parseHeader(data []byte) Header {
 
 func parseQuestions(data []byte, numQuestions uint16) ([]Question, uint16) {
 	var questions []Question
-
-	// This will ensure that we can use the `offset` portion in a compressed message
-	wholeMsgOffset := 12
-
 	// This is the byte number corresponding to the byte after the last Header byte.
 	// This will be incremented to the byte after the end of the question section
-	currentByte := wholeMsgOffset
+	currentByte := 12
 
 	// This helps ensure we iterate through all questions
 	var startIdx uint16
@@ -46,7 +42,7 @@ func parseQuestions(data []byte, numQuestions uint16) ([]Question, uint16) {
 		var question Question
 
 		// QNAME
-		qname, start, isPointer := parseDomainName(data, startIdx /*uint16(wholeMsgOffset)*/)
+		qname, start, isPointer := parseDomainName(data, startIdx)
 		if isPointer {
 			start += 2 // Increment past both pointer octets
 		}
@@ -132,12 +128,7 @@ func parseMessage(data []byte) Message {
 	}
 }
 
-// parseDomainName extracts the domain name from the data after the header.
-//
-// `startIdx` is used for recursion.
-//
-// `wholeMsgOffset` provides an indication where in the context of the whole DNS message the particular slice of data begins.
-func parseDomainName(data []byte, startIdx uint16 /*, wholeMsgOffset uint16*/) ([]byte, int, bool) {
+func parseDomainName(data []byte, startIdx uint16) ([]byte, int, bool) {
 	result := []byte{}
 	byteIsContent := false
 	alreadyAppendedNullByte := false
@@ -149,13 +140,9 @@ func parseDomainName(data []byte, startIdx uint16 /*, wholeMsgOffset uint16*/) (
 
 		if !byteIsContent {
 			if (data[startIdx] & 0b1100_0000) == 0b1100_0000 {
-				// Offsetting the pointerOffset value to account for the passed data slice.
-				// For example, the pointerOffset is 12, and the question data set starts at 12 (i.e. wholeMsgOffset),
-				// so we will subtract wholeMsgOffset from pointerOffset to get the correct starting index for the pointer data
 				pointer := (binary.BigEndian.Uint16([]byte{data[startIdx], data[startIdx+1]}) & 0b0011_1111_1111_1111)
-				// newOffset := byte(pointerOffset) - byte(wholeMsgOffset)
 				offset := byte(pointer) - 12 // Since we sliced off the header data, we need to adjust the pointerOffset so that it is pointing to the correct data
-				decompressedData, _, _ := parseDomainName(data, uint16(offset) /*, uint16(wholeMsgOffset)*/)
+				decompressedData, _, _ := parseDomainName(data, uint16(offset))
 				result = append(result, decompressedData...)
 				alreadyAppendedNullByte = true
 				isPointer = true

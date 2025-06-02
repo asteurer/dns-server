@@ -42,12 +42,10 @@ type Message struct {
 	Header    Header
 	Questions []Question
 	Answers   []ResourceRecord
-	// Authority  ResourceRecord
-	// Additional ResourceRecord
 }
 
 func (m1 *Message) Equals(m2 Message) bool {
-	// Compare Header fields
+	// Compare header fields
 	if !(m1.Header.ID == m2.Header.ID &&
 		m1.Header.QR == m2.Header.QR &&
 		m1.Header.Opcode == m2.Header.Opcode &&
@@ -64,6 +62,7 @@ func (m1 *Message) Equals(m2 Message) bool {
 		return false
 	}
 
+	// Compare question fields
 	if len(m1.Questions) != len(m2.Questions) {
 		return false
 	}
