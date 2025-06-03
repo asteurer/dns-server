@@ -8,6 +8,7 @@ pub fn parse_message(data: &Vec<u8>) -> DNSMessage {
     let (questions, answer_idx) = parse_question(&non_header_data, header.qdcount);
     let (answers, _current_byte) = parse_record(&non_header_data, header.ancount, answer_idx);
 
+	// This server only handles standard queries, so we need to indicate that other request types aren't handled
     if header.opcode != Opcode::QUERY {
         header.rcode = RCODE::NotImplemented;
     }
@@ -22,11 +23,11 @@ pub fn parse_message(data: &Vec<u8>) -> DNSMessage {
 fn parse_header(data: &[u8; 12]) -> DNSHeader {
     let id = u16::from_be_bytes([data[0], data[1]]);
 
-    let byte_two = data[2];
-    
+    let byte_two = data[2]; // QR, OPCODE, AA, TC, RD
+
     let qr = match byte_two & 0b1000_0000 {
         0 => QR::Query,
-        _ => QR::Response, 
+        _ => QR::Response,
     };
 
     let opcode = match (byte_two & 0b0111_1000) >> 3 {
@@ -51,7 +52,7 @@ fn parse_header(data: &[u8; 12]) -> DNSHeader {
         _ => true,
     };
 
-    let byte_three= data[3];
+    let byte_three= data[3]; // RA, Z, RCODE
 
     let ra = match byte_three & 0b1000_0000 {
         0 => false,
@@ -76,7 +77,7 @@ fn parse_header(data: &[u8; 12]) -> DNSHeader {
     let arcount = u16::from_be_bytes([data[10], data[11]]);
 
     DNSHeader{
-        id, qr, opcode, aa, tc, rd, ra, z, rcode, 
+        id, qr, opcode, aa, tc, rd, ra, z, rcode,
         qdcount, ancount, nscount, arcount,
     }
 }
@@ -86,27 +87,23 @@ fn parse_question(data: &Vec<u8>, num_questions: u16) -> (Vec<DNSQuestion>, usiz
     let mut current_byte = 0;
 
     for _i in 0..num_questions {
-        let (qname, mut start, is_pointer) = parse_domain(data, current_byte);
-        if is_pointer {
-            start += 2; 
-        }
+        let (qname, start) = parse_domain(data, current_byte);
 
-
-        current_byte = start + 1;
+        current_byte = start + 1; // Increment to start of QTYPE
 
         let qtype = match u16::from_be_bytes([data[current_byte], data[current_byte + 1]]) {
             1 => RecordType::A,
             _ => RecordType::Other,
         };
 
-        current_byte += 2;
+        current_byte += 2; // Increment to start of QCLASS
 
         let qclass = match u16::from_be_bytes([data[current_byte], data[current_byte + 1]]) {
             1 => ClassType::IN,
             _ => ClassType::Other,
         };
 
-        current_byte += 2;
+        current_byte += 2; // Final increment to byte after current question
 
         questions.push(DNSQuestion {qname, qtype, qclass});
     }
@@ -120,38 +117,35 @@ fn parse_record(data: &Vec<u8>, num_answers: u16, current_byte: usize) -> (Vec<R
     let mut current_byte = current_byte;
 
     for _i in 0..num_answers {
-        let (name, mut start, is_pointer) = parse_domain(data, current_byte);
-        if is_pointer {
-            start += 1;
-        }
+        let (name, start) = parse_domain(data, current_byte);
 
-        current_byte = start + 1;
+        current_byte = start + 1; // Increment to start of TYPE
 
         let record_type = match u16::from_be_bytes([data[current_byte], data[current_byte+1]]) {
             1 => RecordType::A,
             _ => RecordType::Other,
         };
-        
-        current_byte +=2 ;
+
+        current_byte +=2; // Increment to start of CLASS
 
         let class = match u16::from_be_bytes([data[current_byte], data[current_byte+1]]) {
             1 => ClassType::IN,
             _ => ClassType::Other,
         };
 
-        current_byte += 2;
+        current_byte += 2; // Increment to start of TTL
 
         let ttl = u32::from_be_bytes([data[current_byte], data[current_byte+1], data[current_byte+2], data[current_byte+3]]);
 
-        current_byte += 4;
+        current_byte += 4; // Increment to start of RDLENGTH
 
         let rdlength = u16::from_be_bytes([data[current_byte], data[current_byte+1]]);
 
-        current_byte += 2;
+        current_byte += 2; // Increment to start of RDATA
 
         let rdata: Vec<u8> = data[current_byte..current_byte+rdlength as usize].to_vec();
 
-        current_byte += rdlength as usize;
+        current_byte += rdlength as usize; // Increment to byte after current record
 
         records.push(ResourceRecord{name, record_type, class, ttl, rdlength, rdata});
 
@@ -161,37 +155,30 @@ fn parse_record(data: &Vec<u8>, num_answers: u16, current_byte: usize) -> (Vec<R
 
 }
 
-fn parse_domain(data: &Vec<u8>, start_idx: usize) -> (Vec<u8>, usize, bool) {
+fn parse_domain(data: &Vec<u8>, start_idx: usize) -> (Vec<u8>, usize) {
     let mut result: Vec<u8> = Vec::new();
     let mut byte_is_content = false;
-    // let mut already_appended_null_byte = false;
-    let mut is_pointer = false;
     let mut start_idx = start_idx;
 
     loop {
-        let mut content_length: u8 = 0; 
+        let mut content_length: u8 = 0;
 
         if !byte_is_content {
             if data[start_idx] & 0b1100_0000 == 0b1100_0000 {
                 let pointer = u16::from_be_bytes([data[start_idx], data[start_idx + 1]]) & 0b0011_1111_1111_1111;
-                let offset = (pointer - 12) as usize;
-                let (decompressed_data, _, _) = parse_domain(data, offset);
+                let offset = (pointer - 12) as usize; // Since we sliced off the header data, we need to adjust the pointerOffset so that it is pointing to the correct data
+                let (decompressed_data, _) = parse_domain(data, offset);
 
                 result.extend(decompressed_data);
-                
-                // already_appended_null_byte = true;
-                is_pointer = true;
+                start_idx += 1; // Increment to the 2nd (last) byte of the pointer
                 break
             }
 
             content_length = data[start_idx];
 
-            // if !already_appended_null_byte {
             result.push(content_length);
-                // already_appended_null_byte = false;
-            // }
 
-            if content_length == 0 {
+            if content_length == 0 { // Null termination byte
                 break
             } else {
                 start_idx += 1;
@@ -207,13 +194,13 @@ fn parse_domain(data: &Vec<u8>, start_idx: usize) -> (Vec<u8>, usize, bool) {
         byte_is_content = false;
     }
 
-    (result, start_idx, is_pointer)
+    (result, start_idx)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_parse_header() {
         struct Test {
@@ -228,19 +215,19 @@ mod tests {
                 data: [
                     0b0000_0100, 0b1101_0010, // ID: 1234
                     0b1010_1010, // QR: 1, Opcode: 5, AA: 0, TC: 1, RD: 0,
-                    0b1101_0011, // RA: 1, Z: 5, RCODE: 3 
+                    0b1101_0011, // RA: 1, Z: 5, RCODE: 3
                     0b0000_0000, 0b0100_0101, // QDCOUNT: 69
                     0b0000_0000, 0b0100_0110, // ANCOUNT: 70
                     0b0000_0000, 0b0100_0111, // NSCOUNT: 71
                     0b0000_0000, 0b0100_1000, // ARCOUNT: 72
                 ],
-                want: DNSHeader { 
-                    id: 1234, 
-                    qr: QR::Response, 
-                    opcode: Opcode::Reserved, 
-                    aa: false, tc: true, rd: false, ra: true, z: 5, 
-                    rcode: RCODE::NameError, 
-                    qdcount: 69, ancount: 70, nscount: 71, arcount: 72 
+                want: DNSHeader {
+                    id: 1234,
+                    qr: QR::Response,
+                    opcode: Opcode::Reserved,
+                    aa: false, tc: true, rd: false, ra: true, z: 5,
+                    rcode: RCODE::NameError,
+                    qdcount: 69, ancount: 70, nscount: 71, arcount: 72
                 }
             }
         ];
@@ -307,7 +294,6 @@ mod tests {
                     0x04,
                     b't', b'e', b's', b't',
                     0b1100_0000, 0b0000_1100, // Offset relative to a fictional header
-                    0x00,
                     0x00, 0x00,
                     0x00, 0x00,
                     0x02,
@@ -342,11 +328,11 @@ mod tests {
                             0x03,
                             b'c', b'o', b'm',
                             0x00,
-                        ], 
+                        ],
 
                         qtype: RecordType::Other,
                         qclass: ClassType::Other,
-                    }, 
+                    },
 
                     DNSQuestion {
                         qname: vec![
@@ -362,85 +348,84 @@ mod tests {
                     }
                 ],
 
-                want_idx: 40,
+                want_idx: 39,
 
             },
 
             Test {
                 label: "more pointer tests".to_string(),
                 num_questions: 2,
-                want_idx: 42,
+                want_idx: 41,
                 data: vec![
                     0b00000011, // abc
-                    0b01100001, 
-                    0b01100010, 
-                    0b01100011, 
+                    0b01100001,
+                    0b01100010,
+                    0b01100011,
                     0b00010001, // longassdomainname
-                    0b01101100, 
-                    0b01101111, 
-                    0b01101110, 
-                    0b01100111, 
-                    0b01100001, 
-                    0b01110011, 
-                    0b01110011, 
-                    0b01100100, 
-                    0b01101111, 
-                    0b01101101, 
-                    0b01100001, 
-                    0b01101001, 
-                    0b01101110, 
-                    0b01101110, 
-                    0b01100001, 
-                    0b01101101, 
-                    0b01100101, 
-                    0b00000011, // com 
-                    0b01100011, 
-                    0b01101111, 
-                    0b01101101, 
+                    0b01101100,
+                    0b01101111,
+                    0b01101110,
+                    0b01100111,
+                    0b01100001,
+                    0b01110011,
+                    0b01110011,
+                    0b01100100,
+                    0b01101111,
+                    0b01101101,
+                    0b01100001,
+                    0b01101001,
+                    0b01101110,
+                    0b01101110,
+                    0b01100001,
+                    0b01101101,
+                    0b01100101,
+                    0b00000011, // com
+                    0b01100011,
+                    0b01101111,
+                    0b01101101,
                     0b00000000, // null termination
-                    0b00000000, 0b00000001, 
-                    0b00000000, 0b00000001, 
+                    0b00000000, 0b00000001,
+                    0b00000000, 0b00000001,
 
                     0b00000011, // def
-                    0b01100100, 
-                    0b01100101, 
-                    0b01100110, 
+                    0b01100100,
+                    0b01100101,
+                    0b01100110,
                     0b11000000, 0b00010000, // pointer
-                    0x00, // null termination
-                    0b00000000, 0b00000001, 
-                    0b00000000, 0b00000001, 
+                    0b00000000, 0b00000001,
+                    0b00000000, 0b00000001,
                 ],
 
                 want_questions: vec![
                     DNSQuestion {
                         qname: vec![
                             0b00000011, // abc
-                            0b01100001, 
-                            0b01100010, 
-                            0b01100011, 
+                            0b01100001,
+                            0b01100010,
+                            0b01100011,
                             0b00010001, // longassdomainname
-                            0b01101100, 
-                            0b01101111, 
-                            0b01101110, 
-                            0b01100111, 
-                            0b01100001, 
-                            0b01110011, 
-                            0b01110011, 
-                            0b01100100, 
-                            0b01101111, 
-                            0b01101101, 
-                            0b01100001, 
-                            0b01101001, 
-                            0b01101110, 
-                            0b01101110, 
-                            0b01100001, 
-                            0b01101101, 
-                            0b01100101, 
-                            0b00000011, // com 
-                            0b01100011, 
-                            0b01101111, 
-                            0b01101101, 
-                            0b00000000, // null termination 
+                            0b01101100,
+                            0b01101111,
+                            0b01101110,
+                            0b01100111,
+                            0b01100001,
+                            0b01110011,
+                            0b01110011,
+                            0b01100100,
+                            0b01101111,
+                            0b01101101,
+                            0b01100001,
+                            0b01101001,
+                            0b01101110,
+                            0b01101110,
+                            0b01100001,
+                            0b01101101,
+                            0b01100101,
+                            0b00000011, // com
+                            0b01100011,
+                            0b01101111,
+                            0b01101101,
+                            0b00000000, // null termination
                         ],
                         qtype: RecordType::A,
                         qclass: ClassType::IN,
@@ -449,40 +434,40 @@ mod tests {
                     DNSQuestion {
                         qname: vec![
                             0b00000011, // def
-                            0b01100100, 
-                            0b01100101, 
-                            0b01100110, 
+                            0b01100100,
+                            0b01100101,
+                            0b01100110,
                             0b00010001, // longassdomainname
-                            0b01101100, 
-                            0b01101111, 
-                            0b01101110, 
-                            0b01100111, 
-                            0b01100001, 
-                            0b01110011, 
-                            0b01110011, 
-                            0b01100100, 
-                            0b01101111, 
-                            0b01101101, 
-                            0b01100001, 
-                            0b01101001, 
-                            0b01101110, 
-                            0b01101110, 
-                            0b01100001, 
-                            0b01101101, 
-                            0b01100101, 
-                            0b00000011, // com 
-                            0b01100011, 
-                            0b01101111, 
-                            0b01101101, 
-                            0b00000000, // null termination 
+                            0b01101100,
+                            0b01101111,
+                            0b01101110,
+                            0b01100111,
+                            0b01100001,
+                            0b01110011,
+                            0b01110011,
+                            0b01100100,
+                            0b01101111,
+                            0b01101101,
+                            0b01100001,
+                            0b01101001,
+                            0b01101110,
+                            0b01101110,
+                            0b01100001,
+                            0b01101101,
+                            0b01100101,
+                            0b00000011, // com
+                            0b01100011,
+                            0b01101111,
+                            0b01101101,
+                            0b00000000, // null termination
                         ],
                         qtype: RecordType::A,
                         qclass: ClassType::IN,
                     }
                 ],
             }
-        ];    
-        
+        ];
+
         for t in tests {
             println!("Running test \"{}\"", t.label);
             let (got_questions, got_idx) = parse_question(&t.data, t.num_questions);
@@ -501,7 +486,7 @@ mod tests {
                 current_byte: usize,
                 data: Vec<u8>,
                 want_answers: Vec<ResourceRecord>,
-                want_idx: usize, 
+                want_idx: usize,
         }
 
         let tests: Vec<Test> = vec![
@@ -595,7 +580,7 @@ mod tests {
                     0b0000_1101,
                     //RDATA
                     b'h', b'e', b'l', b'l', b'o', b',', b' ', b'w', b'o', b'r', b'l', b'd', b'!',
-                ], 
+                ],
 
                 want_answers: vec! [
                     ResourceRecord {

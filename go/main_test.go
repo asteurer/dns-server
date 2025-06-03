@@ -292,7 +292,6 @@ func TestParseQuestions(t *testing.T) {
 				0x04,
 				't', 'e', 's', 't',
 				0b1100_0000, 0b0000_1100, // Offset relative to a fictional header
-				0x00,
 				0x00, 0x00,
 				0x00, 0x00,
 				0x02,
@@ -338,7 +337,7 @@ func TestParseQuestions(t *testing.T) {
 				},
 			},
 
-			wantIdx: 40,
+			wantIdx: 39,
 		},
 	}
 

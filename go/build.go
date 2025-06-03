@@ -4,6 +4,15 @@ import (
 	"encoding/binary"
 )
 
+func buildMessage(m Message) []byte {
+	result := []byte{}
+	result = append(result, buildHeader(m.Header)...)
+	result = append(result, buildQuestions(m.Questions)...)
+	result = append(result, buildRecords(m.Answers)...)
+
+	return result
+}
+
 func buildHeader(h Header) []byte {
 	result := []byte{}
 
@@ -79,15 +88,6 @@ func buildQuestions(questions []Question) []byte {
 		result = append(result, buf...)
 
 	}
-
-	return result
-}
-
-func buildMessage(m Message) []byte {
-	result := []byte{}
-	result = append(result, buildHeader(m.Header)...)
-	result = append(result, buildQuestions(m.Questions)...)
-	result = append(result, buildRecords(m.Answers)...)
 
 	return result
 }

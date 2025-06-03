@@ -24,16 +24,11 @@ fn main() -> Result<(), Box<dyn error::Error>>{
     println!("Server running on 127.0.0.1:2053");
     let udp_socket = UdpSocket::bind("127.0.0.1:2053").expect("Failed to bind to address");
     let mut buf = [0; 512];
-    
+
     loop {
         match udp_socket.recv_from(&mut buf) {
             Ok((size, source)) => {
                 let data: Vec<u8> = buf[..size].to_vec();
-                println!("LOG: begin iteration");
-                for b in data.iter() {
-                    println!("LOG: byte: {:08b}", b);
-                }
-
                 let mut response: Vec<u8> = Vec::new();
 
                 match &forward_conn {
@@ -51,7 +46,7 @@ fn main() -> Result<(), Box<dyn error::Error>>{
                         }
                     }
                 }
-                    
+
                 udp_socket
                     .send_to(&response, source)
                     .expect("Failed to send response");
@@ -69,13 +64,13 @@ fn main() -> Result<(), Box<dyn error::Error>>{
 fn forward_request(data: Vec<u8>, forward_conn: &UdpSocket) -> Result<Vec<u8>, anyhow::Error>{
     let mut msg = parse_message(&data);
     let mut all_answers: Vec<ResourceRecord> = Vec::new();
-    
+
     for q in msg.questions.iter() {
         let mut header = msg.header;
         header.qdcount = 1;
-         
+
         let questions = vec![DNSQuestion{
-            qname: q.qname.to_owned(), 
+            qname: q.qname.to_owned(),
             qtype: q.qtype,
             qclass: q.qclass,
         }];
@@ -88,13 +83,14 @@ fn forward_request(data: Vec<u8>, forward_conn: &UdpSocket) -> Result<Vec<u8>, a
             Ok(_) => (),
             Err(e) => return Err(anyhow!("failed to send data to forward server: {e}",)),
         };
-        
+
         let mut buf = [0; 512];
         let bytes_received = forward_conn.recv(&mut buf)?;
         let response_data: Vec<u8> = buf[..bytes_received].to_vec();
 
         let mut response = parse_message(&response_data);
-        
+
+        // If there's an empty response, return an empty answer
         if response.header.ancount == 0 {
             response.answers = Vec::new();
         }
@@ -134,6 +130,6 @@ fn resolve_request(data: Vec<u8>) -> Result<Vec<u8>, anyhow::Error> {
     }
 
     msg.header.ancount = msg.answers.len() as u16;
-    
+
     Ok(build_message(msg))
 }

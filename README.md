@@ -11,7 +11,7 @@ For the Go application: make sure you have Go version `1.24` or later installed,
 
 For the Rust application: make sure you have Rust version `1.86.0` or later installed, and be sure that you have navigated inside the `rust` directory.
 
-To run the code, you have two options: 
+To run the code, you have two options:
 - You can run this as a DNS resolver, which will mean any DNS requests sent to the server will resolve to IP address `192.168.0.6`
     - For Go, run `go run .`
     - For Rust, run `cargo run`

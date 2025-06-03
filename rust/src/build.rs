@@ -11,7 +11,7 @@ pub fn build_message(message: DNSMessage) -> Vec<u8> {
 
 fn build_header(h: DNSHeader) -> Vec<u8> {
     let mut result: Vec<u8> = Vec::new();
-    
+
     // Place the ID
     result.extend_from_slice(&h.id.to_be_bytes());
 
@@ -82,7 +82,7 @@ fn build_questions(questions: Vec<DNSQuestion>) -> Vec<u8> {
         result.extend_from_slice(&q.qname);
 
         let qtype: u16 = match q.qtype {
-            RecordType::A => 1, 
+            RecordType::A => 1,
             RecordType::Other => 0, // This is wrong, but I only care about A-type records
         };
 
@@ -119,7 +119,7 @@ fn build_records(records: Vec<ResourceRecord>) -> Vec<u8> {
         result.extend_from_slice(&class.to_be_bytes());
         result.extend_from_slice(&r.ttl.to_be_bytes());
         result.extend_from_slice(&r.rdlength.to_be_bytes());
-        result.extend_from_slice(&r.rdata);   
+        result.extend_from_slice(&r.rdata);
     }
 
     result
@@ -158,7 +158,7 @@ mod tests {
         let tests: Vec<Test> = vec![
             Test {
                 label: "basic test 1".to_string(),
-                h: DNSHeader { 
+                h: DNSHeader {
                     id:     0b0000_0100_1101_0010,
                     qr:     QR::Query,
                     opcode: Opcode::STATUS,
@@ -286,7 +286,7 @@ mod tests {
                         b'e', b'x', b'a', b'm', b'p', b'l', b'e',
                         0x03,
                         b'c', b'o', b'm',
-                        0x00, 
+                        0x00,
                     ],
                     record_type: RecordType::A,
                     class: ClassType::IN,
@@ -300,7 +300,7 @@ mod tests {
                     b'e', b'x', b'a', b'm', b'p', b'l', b'e',
                     0x03,
                     b'c', b'o', b'm',
-                    0x00, 
+                    0x00,
                     0x00, 0x01,
                     0x00, 0x01,
                     0x00, 0x00, 0x00, 0x00,
