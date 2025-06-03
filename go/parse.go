@@ -4,22 +4,39 @@ import (
 	"encoding/binary"
 )
 
+func parseMessage(data []byte) Message {
+	header := parseHeader(data[0:12])
+	questions, ansIdx := parseQuestions(data[12:], header.QDCOUNT)
+	answers, _ := parseRecords(data[12:], header.ANCOUNT, ansIdx)
+
+	// This server only handles standard queries, so we need to indicate that other request types aren't handled
+	if header.Opcode != 0 {
+		header.RCODE = 4
+	}
+
+	return Message{
+		Header:    header,
+		Questions: questions,
+		Answers:   answers,
+	}
+}
+
 func parseHeader(data []byte) Header {
 	var header Header
 
 	header.ID = binary.BigEndian.Uint16(data[:2])
 
-	byteThree := data[2] // QR, OPCODE, AA, TC, RD
-	header.QR = (byteThree & 0b1000_0000) != 0
-	header.Opcode = (byteThree & 0b0111_1000) >> 3
-	header.AA = (byteThree & 0b0000_0100) != 0
-	header.TC = (byteThree & 0b0000_0010) != 0
-	header.RD = (byteThree & 0b0000_0001) != 0
+	byteTwo := data[2] // QR, OPCODE, AA, TC, RD
+	header.QR = (byteTwo & 0b1000_0000) != 0
+	header.Opcode = (byteTwo & 0b0111_1000) >> 3
+	header.AA = (byteTwo & 0b0000_0100) != 0
+	header.TC = (byteTwo & 0b0000_0010) != 0
+	header.RD = (byteTwo & 0b0000_0001) != 0
 
-	byteFour := data[3] // RA, Z, RCODE
-	header.RA = (byteFour & 0b1000_0000) != 0
-	header.Z = (byteFour & 0b0111_0000) >> 4
-	header.RCODE = (byteFour & 0b0000_1111)
+	byteThree := data[3] // RA, Z, RCODE
+	header.RA = (byteThree & 0b1000_0000) != 0
+	header.Z = (byteThree & 0b0111_0000) >> 4
+	header.RCODE = (byteThree & 0b0000_1111)
 
 	header.QDCOUNT = binary.BigEndian.Uint16(data[4:6])
 	header.ANCOUNT = binary.BigEndian.Uint16(data[6:8])
@@ -36,10 +53,7 @@ func parseQuestions(data []byte, numQuestions uint16) ([]Question, uint16) {
 	for range numQuestions {
 		var question Question
 
-		qname, start, isPointer := parseDomainName(data, uint16(currentByte))
-		if isPointer {
-			start += 2 // Increment to null termination byte
-		}
+		qname, start := parseDomainName(data, uint16(currentByte))
 
 		currentByte = start + 1 // Increment to start of QTYPE
 
@@ -64,29 +78,26 @@ func parseRecords(data []byte, numAnswers uint16, currentByte uint16) ([]Resourc
 
 	for range numAnswers {
 		var record ResourceRecord
-		name, start, isPointer := parseDomainName(data, currentByte)
-		if isPointer {
-			start += 1 // Increment to last octet of pointer
-		}
+		name, start := parseDomainName(data, currentByte)
 
 		record.Name = name
 
-		currentByte = uint16(start + 1)
+		currentByte = uint16(start + 1) // Increment to start of TYPE
 
 		record.Type = binary.BigEndian.Uint16(data[currentByte : currentByte+2])
-		currentByte += 2
+		currentByte += 2 // Increment to start of CLASS
 
 		record.Class = binary.BigEndian.Uint16(data[currentByte : currentByte+2])
-		currentByte += 2
+		currentByte += 2 // Increment to start of TTL
 
 		record.TTL = binary.BigEndian.Uint32(data[currentByte : currentByte+4])
-		currentByte += 4
+		currentByte += 4 // Increment to start of RDLENGTH
 
 		record.RDLENGTH = binary.BigEndian.Uint16(data[currentByte : currentByte+2])
-		currentByte += 2
+		currentByte += 2 // Increment to start of RDATA
 
 		record.RDATA = data[currentByte : currentByte+record.RDLENGTH]
-		currentByte += record.RDLENGTH
+		currentByte += record.RDLENGTH // Increment to byte after current record
 
 		records = append(records, record)
 	}
@@ -94,30 +105,9 @@ func parseRecords(data []byte, numAnswers uint16, currentByte uint16) ([]Resourc
 	return records, currentByte
 }
 
-func parseMessage(data []byte) Message {
-	header := parseHeader(data[0:12])
-	questions, ansIdx := parseQuestions(data[12:], header.QDCOUNT)
-	answers, _ := parseRecords(data[12:], header.ANCOUNT, ansIdx)
-
-	// This server only handles standard queries, so we need to indicate that other request types aren't handled
-	if header.Opcode != 0 {
-		header.RCODE = 4
-	}
-
-	return Message{
-		Header:    header,
-		Questions: questions,
-		Answers:   answers,
-	}
-}
-
-func parseDomainName(data []byte, startIdx uint16) ([]byte, int, bool) {
+func parseDomainName(data []byte, startIdx uint16) ([]byte, int) {
 	result := []byte{}
 	byteIsContent := false
-	alreadyAppendedNullByte := false
-	// Resource records and questions handle null termination for pointers differently, so this will help
-	// each respective function handle the pointers effectively
-	isPointer := false
 	for {
 		var labelLen byte
 
@@ -125,20 +115,15 @@ func parseDomainName(data []byte, startIdx uint16) ([]byte, int, bool) {
 			if (data[startIdx] & 0b1100_0000) == 0b1100_0000 {
 				pointer := (binary.BigEndian.Uint16([]byte{data[startIdx], data[startIdx+1]}) & 0b0011_1111_1111_1111)
 				offset := byte(pointer) - 12 // Since we sliced off the header data, we need to adjust the pointerOffset so that it is pointing to the correct data
-				decompressedData, _, _ := parseDomainName(data, uint16(offset))
+				decompressedData, _ := parseDomainName(data, uint16(offset))
 				result = append(result, decompressedData...)
-				alreadyAppendedNullByte = true
-				isPointer = true
+				startIdx++ // Increment to the 2nd (last) byte of the pointer
 				break
 			}
 
 			labelLen = data[startIdx]
 
-			// This helps make sure we don't add duplicate null termination bytes to the result array
-			if !alreadyAppendedNullByte {
-				result = append(result, labelLen)
-				alreadyAppendedNullByte = false
-			}
+			result = append(result, labelLen)
 
 			if labelLen == 0 { // Null termination byte
 				break
@@ -156,5 +141,5 @@ func parseDomainName(data []byte, startIdx uint16) ([]byte, int, bool) {
 		byteIsContent = false
 	}
 
-	return result, int(startIdx), isPointer
+	return result, int(startIdx)
 }
