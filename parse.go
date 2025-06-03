@@ -31,41 +31,27 @@ func parseHeader(data []byte) Header {
 
 func parseQuestions(data []byte, numQuestions uint16) ([]Question, uint16) {
 	var questions []Question
-	// This is the byte number corresponding to the byte after the last Header byte.
-	// This will be incremented to the byte after the end of the question section
-	currentByte := 12
-
-	// This helps ensure we iterate through all questions
-	var startIdx uint16
+	currentByte := 0
 
 	for range numQuestions {
 		var question Question
 
-		// QNAME
-		qname, start, isPointer := parseDomainName(data, startIdx)
+		qname, start, isPointer := parseDomainName(data, uint16(currentByte))
 		if isPointer {
-			start += 2 // Increment past both pointer octets
+			start += 2 // Increment to null termination byte
 		}
 
-		// Increment to start of QTYPE
-		currentByte = start + 1
+		currentByte = start + 1 // Increment to start of QTYPE
 
 		question.QNAME = qname
 
-		// QTYPE & QCLASS
 		question.QTYPE = binary.BigEndian.Uint16(data[currentByte : currentByte+2])
 
-		// Increment to start of QCLASS
-		currentByte += 2
+		currentByte += 2 // Increment to start of QCLASS
 
 		question.QCLASS = binary.BigEndian.Uint16(data[currentByte : currentByte+2])
 
-		// Final increment to byte after current question
-		currentByte += 2
-
-		// Updating new startIdx for multiple questions
-		// Incrementing start by 2 to keep pace with currentByte
-		startIdx = uint16(currentByte)
+		currentByte += 2 // Final increment to byte after current question
 
 		questions = append(questions, question)
 	}
@@ -73,15 +59,14 @@ func parseQuestions(data []byte, numQuestions uint16) ([]Question, uint16) {
 	return questions, uint16(currentByte)
 }
 
-func parseRecords(data []byte, numAnswers uint16, startIdx uint16) ([]ResourceRecord, uint16) {
+func parseRecords(data []byte, numAnswers uint16, currentByte uint16) ([]ResourceRecord, uint16) {
 	var records []ResourceRecord
-	var currentByte uint16
 
 	for range numAnswers {
 		var record ResourceRecord
-		name, start, isPointer := parseDomainName(data, startIdx /*wholeMsgOffset*/)
+		name, start, isPointer := parseDomainName(data, currentByte)
 		if isPointer {
-			start += 1 // Increment past pointer octet
+			start += 1 // Increment to last octet of pointer
 		}
 
 		record.Name = name
@@ -102,8 +87,6 @@ func parseRecords(data []byte, numAnswers uint16, startIdx uint16) ([]ResourceRe
 
 		record.RDATA = data[currentByte : currentByte+record.RDLENGTH]
 		currentByte += record.RDLENGTH
-
-		startIdx = currentByte
 
 		records = append(records, record)
 	}

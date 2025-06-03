@@ -459,7 +459,6 @@ func TestParseRecords(t *testing.T) {
 				// ANSWER
 				// Name
 				0b1100_0000, 0b0000_1100, // Offset relative to a fictional header
-				// 0x00,
 				// Type
 				0b0000_0000,
 				0b0000_0001,
